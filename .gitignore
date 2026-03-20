@@ -4,3 +4,71 @@
 !project.code-workspace
 
 # Please add your custom content below!
+
+# >>> promptfiles-copilot managed content - DO NOT EDIT BELOW THIS LINE >>>
+# ==============================================================================
+# SEE: https://github.com/stefaniuk/promptfiles-copilot/blob/main/.gitignore.promptfiles
+
+# ------------------------------------------------------------------------------
+# Claude Code configuration
+# ------------------------------------------------------------------------------
+
+# Commands (spec-kit)
+.claude/commands/speckit.*
+
+# Instructions file
+.claude/CLAUDE.md
+
+# ------------------------------------------------------------------------------
+# GitHub Copilot configuration
+# ------------------------------------------------------------------------------
+
+# Agents (spec-kit)
+.github/agents/speckit.*
+
+# Instructions (shell, docker, makefile, readme, and technology-specific)
+.github/instructions/
+
+# Prompts (architecture, enforce, review, speckit, util)
+.github/prompts/
+
+# Skills (repository-template and technology-specific)
+.github/skills/
+
+# Instructions file
+.github/copilot-instructions.md
+
+# ------------------------------------------------------------------------------
+# Specify framework
+# ------------------------------------------------------------------------------
+
+# Constitution
+.specify/memory/constitution.md
+
+# Bash scripts
+.specify/scripts/bash/
+
+# Templates
+.specify/templates/
+
+# ------------------------------------------------------------------------------
+# Documentation
+# ------------------------------------------------------------------------------
+
+# Pull request template (only copied if not present)
+# .github/pull_request_template.md
+
+# ADR template
+docs/adr/ADR-nnn_Any_Decision_Record_Template.md
+docs/adr/Tech_Radar.md
+
+# Prompts documentation
+docs/prompts/
+
+# ------------------------------------------------------------------------------
+# Workspace configuration
+# ------------------------------------------------------------------------------
+
+# VS Code workspace file (only copied if not present)
+# project.code-workspace
+# <<< promptfiles-copilot managed content - DO NOT EDIT ABOVE THIS LINE <<<
