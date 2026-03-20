@@ -1,10 +1,29 @@
 # ADR-001: Link Capture Payload Contract
 
-| Field | Value |
-| --- | --- |
-| Date | `2026-03-20` |
-| Status | `Accepted` |
-| Significance | `Interfaces & contracts, Data, Security & privacy` |
+> |              |                                                    |
+> | ------------ | -------------------------------------------------- |
+> | Date         | `2026-03-20`                                       |
+> | Status       | `Accepted`                                         |
+> | Significance | `Interfaces & contracts, Data, Security & privacy` |
+
+---
+
+- [ADR-001: Link Capture Payload Contract](#adr-001-link-capture-payload-contract)
+  - [Context 🧭](#context-)
+  - [Decision ✅](#decision-)
+    - [Assumptions 🧩](#assumptions-)
+    - [Drivers 🎯](#drivers-)
+    - [Options 🔀](#options-)
+      - [Option A: Required HTML on supported pages, partial payload when blocked, recommended metadata optional (Selected) ✅](#option-a-required-html-on-supported-pages-partial-payload-when-blocked-recommended-metadata-optional-selected-)
+      - [Option B: URL and title first, HTML optional later](#option-b-url-and-title-first-html-optional-later)
+      - [Option C: Always require HTML and fail the capture when HTML is blocked](#option-c-always-require-html-and-fail-the-capture-when-html-is-blocked)
+    - [Outcome 🏁](#outcome-)
+    - [Rationale 🧠](#rationale-)
+  - [Consequences ⚖️](#consequences-️)
+  - [Compliance 📏](#compliance-)
+  - [Notes 🔗](#notes-)
+  - [Actions ✅](#actions-)
+  - [Tags 🏷️](#tags-️)
 
 ## Context 🧭
 
@@ -55,14 +74,14 @@ Scoring method: weighted score = `sum(weight * score) / sum(weights)`, where hig
 
 This option defines one versioned contract with two valid first-release outcomes: a full payload for supported HTML pages and a partial payload when HTML capture is blocked. Recommended metadata stays additive.
 
-| Criteria | Weight | Score/Notes |
-| -------- | ------ | ----------- |
-| Contract clarity | 5 | ⭐⭐⭐⭐⭐ Clear required fields for both full and partial capture outcomes. |
-| Restricted-context operability | 5 | ⭐⭐⭐⭐⭐ Works on blocked pages without silent failure. |
-| Privacy control | 4 | ⭐⭐⭐⭐ Limits mandatory fields and keeps extra metadata optional. |
-| Extensibility | 3 | ⭐⭐⭐⭐⭐ Recommended metadata can be added without changing required first-release behaviour. |
-| Effort | 2 | ⭐⭐⭐ Requires two payload examples and explicit fallback handling, but remains straightforward. |
-| Total score | - | `4.58 / 5.00` |
+| Criteria                       | Weight | Score/Notes                                                                                       |
+| ------------------------------ | ------ | ------------------------------------------------------------------------------------------------- |
+| Contract clarity               | 5      | ⭐⭐⭐⭐⭐ Clear required fields for both full and partial capture outcomes.                      |
+| Restricted-context operability | 5      | ⭐⭐⭐⭐⭐ Works on blocked pages without silent failure.                                         |
+| Privacy control                | 4      | ⭐⭐⭐⭐ Limits mandatory fields and keeps extra metadata optional.                               |
+| Extensibility                  | 3      | ⭐⭐⭐⭐⭐ Recommended metadata can be added without changing required first-release behaviour.   |
+| Effort                         | 2      | ⭐⭐⭐ Requires two payload examples and explicit fallback handling, but remains straightforward. |
+| Total score                    | -      | `4.58 / 5.00`                                                                                     |
 
 #### Option B: URL and title first, HTML optional later
 
@@ -72,14 +91,14 @@ This option defines one versioned contract with two valid first-release outcomes
 
 This option reduces first-release scope by treating HTML as a later enhancement.
 
-| Criteria | Weight | Score/Notes |
-| -------- | ------ | ----------- |
-| Contract clarity | 5 | ⭐⭐ Conflicts with the agreed product direction and leaves too much ambiguity in the first-release contract. |
-| Restricted-context operability | 5 | ⭐⭐⭐⭐ Easy to support on blocked pages because HTML is not required. |
-| Privacy control | 4 | ⭐⭐⭐⭐ Lower risk because the payload is smaller. |
-| Extensibility | 3 | ⭐⭐ Requires a material contract change when HTML becomes mandatory later. |
-| Effort | 2 | ⭐⭐⭐⭐⭐ Lowest implementation effort. |
-| Total score | - | `3.26 / 5.00` |
+| Criteria                       | Weight | Score/Notes                                                                                                   |
+| ------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------- |
+| Contract clarity               | 5      | ⭐⭐ Conflicts with the agreed product direction and leaves too much ambiguity in the first-release contract. |
+| Restricted-context operability | 5      | ⭐⭐⭐⭐ Easy to support on blocked pages because HTML is not required.                                       |
+| Privacy control                | 4      | ⭐⭐⭐⭐ Lower risk because the payload is smaller.                                                           |
+| Extensibility                  | 3      | ⭐⭐ Requires a material contract change when HTML becomes mandatory later.                                   |
+| Effort                         | 2      | ⭐⭐⭐⭐⭐ Lowest implementation effort.                                                                      |
+| Total score                    | -      | `3.26 / 5.00`                                                                                                 |
 
 **Why not chosen**: It does not match the agreed requirement that HTML is part of the first release for supported pages. It also creates avoidable contract churn later.
 
@@ -91,14 +110,14 @@ This option reduces first-release scope by treating HTML as a later enhancement.
 
 This option enforces a single strict payload shape and treats blocked HTML capture as a hard failure.
 
-| Criteria | Weight | Score/Notes |
-| -------- | ------ | ----------- |
-| Contract clarity | 5 | ⭐⭐⭐⭐ Very clear contract for supported pages. |
-| Restricted-context operability | 5 | ⭐ Fails on restricted pages and increases user-visible failure cases. |
-| Privacy control | 4 | ⭐⭐⭐⭐⭐ Strictly limits the system to successful HTML capture only. |
-| Extensibility | 3 | ⭐⭐ Leaves little room for graceful degradation without revisiting the contract. |
-| Effort | 2 | ⭐⭐⭐⭐ Simpler contract, but operationally brittle. |
-| Total score | - | `3.11 / 5.00` |
+| Criteria                       | Weight | Score/Notes                                                                       |
+| ------------------------------ | ------ | --------------------------------------------------------------------------------- |
+| Contract clarity               | 5      | ⭐⭐⭐⭐ Very clear contract for supported pages.                                 |
+| Restricted-context operability | 5      | ⭐ Fails on restricted pages and increases user-visible failure cases.            |
+| Privacy control                | 4      | ⭐⭐⭐⭐⭐ Strictly limits the system to successful HTML capture only.            |
+| Extensibility                  | 3      | ⭐⭐ Leaves little room for graceful degradation without revisiting the contract. |
+| Effort                         | 2      | ⭐⭐⭐⭐ Simpler contract, but operationally brittle.                             |
+| Total score                    | -      | `3.11 / 5.00`                                                                     |
 
 **Why not chosen**: It conflicts with the need for reliable capture behaviour across restricted Chrome contexts and would force the extension to fail more often than necessary.
 
