@@ -1,0 +1,85 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# ShellCheck command wrapper. It will run ShellCheck natively if it is
+# installed, otherwise it will run it in a Docker container.
+#
+# Usage:
+#   $ [options] ./check-shell-lint.sh
+#
+# Arguments (provided as environment variables):
+#   file=shellscript        # Path to the shell script to lint, relative to the project's top-level directory, default is itself
+#   FORCE_USE_DOCKER=true   # If set to true the command is run in a Docker container, default is 'false'
+#   VERBOSE=true            # Show all the executed commands, default is 'false'
+
+# ==============================================================================
+
+# Run shellcheck in native or Docker mode.
+function main() {
+
+  cd "$(git rev-parse --show-toplevel)"
+
+  [ -z "${file:-}" ] && echo "WARNING: 'file' variable not set, defaulting to itself"
+  local file=${file:-scripts/quality/check-shell-lint.sh}
+  if command -v shellcheck > /dev/null 2>&1 && ! is-arg-true "${FORCE_USE_DOCKER:-false}"; then
+    file="$file" run-shellcheck-natively
+  else
+    file="$file" run-shellcheck-in-docker
+  fi
+
+  return 0
+}
+
+# Run ShellCheck natively.
+# Arguments (provided as environment variables):
+#   file=[path to the shell script to lint, relative to the project's top-level directory]
+function run-shellcheck-natively() {
+
+  # shellcheck disable=SC2001
+  shellcheck "$(echo "$file" | sed "s#$PWD#.#")"
+
+  return 0
+}
+
+# Run ShellCheck in a Docker container.
+# Arguments (provided as environment variables):
+#   file=[path to the shell script to lint, relative to the project's top-level directory]
+function run-shellcheck-in-docker() {
+
+  # shellcheck disable=SC1091
+  source ./scripts/docker/docker.lib.sh
+
+  # shellcheck disable=SC2155
+  local image=$(name=koalaman/shellcheck docker-get-image-version-and-pull)
+  # shellcheck disable=SC2001
+  docker run --rm --platform linux/amd64 \
+    --volume "$PWD:/workdir" \
+    --workdir /workdir \
+    "$image" \
+      "/workdir/$(echo "$file" | sed "s#$PWD#.#")"
+
+  return 0
+}
+
+# ==============================================================================
+
+# Check whether the supplied argument represents a true boolean value.
+# Arguments:
+#   $1=[value to evaluate]
+function is-arg-true() {
+
+  if [[ "$1" =~ ^(true|yes|y|on|1|TRUE|YES|Y|ON)$ ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# ==============================================================================
+
+is-arg-true "${VERBOSE:-false}" && set -x
+
+main "$@"
+
+exit 0
