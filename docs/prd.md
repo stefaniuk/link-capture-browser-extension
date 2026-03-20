@@ -23,9 +23,11 @@ The extension must allow the user to send the current page information by either
 - clicking the extension icon in Chrome
 - using a keyboard shortcut
 
-The extension must initially support sending the current page URL to a backend REST endpoint. The design should also support sending additional page metadata and, where required, HTML content captured from the active page.
+The extension must support sending the current page URL, page title, and page HTML to a backend REST endpoint for supported HTML pages. Where HTML capture is blocked by browser restrictions or page type, the extension must still send a partial payload containing the available metadata plus explicit capture status and failure reason fields.
 
 A local mock service is required during development and testing so that payloads emitted by the extension can be validated safely before integration with a real backend service. Contract testing should be considered as part of the delivery approach to ensure that the payload schema is implemented consistently by both the extension and the backend service.
+
+TODO: 1) Research contract testing, 2) Make contract testing mandatory
 
 ## 2. Purpose
 
@@ -36,20 +38,20 @@ The product should:
 - reduce friction in capturing links from the browser
 - provide a consistent API payload to backend services
 - support professional engineering practices, including local development, mocking, and contract verification
-- offer an extensible foundation for future metadata capture without forcing the first release to solve downstream processing concerns
+- offer an extensible foundation for additional metadata capture without forcing the first release to solve downstream processing concerns
 
 ## 3. Goals
 
 ### 3.1 Primary Goals
 
-- Enable a user to send the active page URL to a backend REST API from Chrome.
+- Enable a user to send the active page URL, page title, and page HTML for supported pages to a backend REST API from Chrome.
 - Support two user invocation methods:
   - extension toolbar icon click
   - keyboard shortcut
 
-- Define a clear, versionable API payload contract between the extension and backend service.
+- Define a clear, versionable API payload contract between the extension and backend service for both full and partial capture outcomes.
 - Provide a local mock/testing approach so the extension can be developed and verified independently of the real backend.
-- Establish a design that can be extended later to include page title and page HTML.
+- Establish a design that can be extended later to include additional metadata without changing the core capture flow.
 
 ### 3.2 Secondary Goals
 
@@ -71,6 +73,8 @@ The following are explicitly out of scope for this PRD:
 - full scraping, parsing, extraction, or transformation of captured HTML on the backend
 - implementation of downstream data contracts outside the capture payload itself
 
+TODO: 1) Research how extension can authenticate against the API, 2) Make it a requirement
+
 ## 5. Background and Context
 
 The product is part of a larger professional service. The browser extension acts as a focused capture client that transmits page-related data to a backend service. The backend service will process the payload further, but that processing belongs to a separate workstream.
@@ -81,9 +85,11 @@ The conversation to date established the following delivery assumptions:
 - the extension should use the Chrome Extensions Manifest V3 model
 - the extension should support both toolbar action and keyboard command invocation
 - a background service worker is the correct place to coordinate sending data to the API
-- page HTML capture is possible, but requires page-context access through a content script or `chrome.scripting.executeScript()`
+- page HTML capture is required for supported pages, but requires page-context access through a content script or `chrome.scripting.executeScript()`
 - a local mock endpoint is needed to inspect and test payloads during development
 - contract testing should be considered to keep both extension and backend aligned on payload format
+
+TODO: Extension code must be unit-testable
 
 ## 6. Users and Stakeholders
 
@@ -124,13 +130,16 @@ The product will include:
 - an extension action that triggers capture when the icon is clicked
 - a keyboard command that triggers the same capture flow
 - retrieval of the active tab URL
-- optional retrieval of the active tab title
-- optional retrieval of page HTML for supported pages
+- retrieval of the active tab title where available
+- retrieval of page HTML for supported pages
 - POST submission of payload data to a configured REST API endpoint
+- partial payload submission when HTML capture is blocked
 - local development support using an unpacked extension
 - local mock server support for payload inspection and testing
 - documented payload schema
 - consideration of contract testing between client and backend
+
+TODO: Encode page content (HTML and JavaScript) to be safely included in JSON payload
 
 ## 8.2 Out of Scope
 
@@ -161,30 +170,57 @@ The system shall capture the URL of the active page, where Chrome permissions an
 
 ### FR5. Capture Title
 
-The system should capture the page title as part of the payload.
+The system shall capture the page title as part of the payload where it is available.
 
-### FR6. Optional HTML Capture
+### FR6. Capture HTML
 
-The system may capture the page HTML content in addition to the URL and title.
+The system shall capture the page HTML content in addition to the URL and title for supported HTML pages.
 
 Notes:
 
 - HTML capture is expected to use page-context execution rather than direct access from the background service worker.
-- HTML capture should be feature-flagged or configurable during implementation to avoid unnecessary payload size and privacy risk in the earliest version.
+- When HTML capture is blocked, the system shall send a partial payload with the required fallback fields defined by the payload contract.
+
+TODO: Post MVP - 1) capture open and close of the page, 2) background page processing without user interaction, e.g. classification of the page for later approval
 
 ### FR7. Submit Payload to REST API
 
 The system shall send the capture payload to a configured backend REST endpoint using an HTTP POST request with a JSON body.
 
-### FR8. Include Basic Metadata
+### FR8. Include Capture Metadata
 
-The system should include useful request metadata in the payload, such as:
+The system shall include request metadata in the payload according to the payload contract.
+
+Required on supported HTML pages:
 
 - URL
 - page title
+- HTML content
 - trigger source, for example `icon` or `shortcut`
 - timestamp of capture
-- optional HTML content
+- schema version
+
+Required when HTML capture is blocked:
+
+- URL
+- page title, if available
+- trigger source
+- timestamp of capture
+- schema version
+- capture status
+- failure reason
+
+Optional but recommended:
+
+- canonical URL
+- page language
+- meta description
+- site name
+- author
+- published date
+- HTML byte length
+- HTML hash
+- extension version
 
 ### FR9. Handle Submission Errors
 
@@ -202,45 +238,55 @@ The system shall implement a single internal capture-and-send flow used by both 
 
 The system shall handle cases where the active tab does not expose a readable URL or does not allow page script injection.
 
-## 10. Proposed Payload Model
+## 10. Proposed Payload Contract
 
-The minimum viable payload is:
-
-```json
-{
-  "url": "https://example.com/article"
-}
-```
-
-The preferred initial professional payload is:
+The first-release payload for supported HTML pages is:
 
 ```json
 {
   "url": "https://example.com/article",
   "title": "Example Article",
+  "html": "<html>...</html>",
   "trigger": "icon",
-  "capturedAt": "2026-03-20T10:15:00.000Z"
+  "capturedAt": "2026-03-20T10:15:00.000Z",
+  "schemaVersion": "1.0.0"
 }
 ```
 
-The extended payload model for pages where HTML capture is enabled is:
+The first-release payload when HTML capture is blocked is:
 
 ```json
 {
-  "url": "https://example.com/article",
-  "title": "Example Article",
+  "url": "chrome://extensions/",
   "trigger": "shortcut",
   "capturedAt": "2026-03-20T10:15:00.000Z",
-  "html": "<html>...</html>"
+  "schemaVersion": "1.0.0",
+  "captureStatus": "partial",
+  "failureReason": "html_capture_blocked"
 }
 ```
+
+Optional but recommended metadata may be added to either payload shape when available and appropriate:
+
+TODO: Make the `Optional but recommended metadata` part of the requirements, this is not optional, however only send all the fields below if the configuration option of extend fields is enabled, default is false
+
+- `canonicalUrl`
+- `language`
+- `metaDescription`
+- `siteName`
+- `author`
+- `publishedDate`
+- `htmlByteLength`
+- `htmlHash`
+- `extensionVersion`
 
 ## 10.1 Payload Design Principles
 
 - JSON over HTTP POST
 - stable and versionable
-- minimal required fields in the first release
-- explicitly extensible for future metadata
+- explicit required fields for the first release
+- one versioned contract for both full and partial capture outcomes
+- explicitly extensible for additional metadata
 - suitable for schema validation and contract testing
 
 ## 10.2 Contract Considerations
@@ -286,7 +332,7 @@ Initial permissions are expected to include only what is necessary, likely inclu
 
 - `activeTab`
 - `tabs`
-- `scripting` if HTML capture is enabled
+- `scripting` for required page HTML capture
 - `host_permissions` for the backend API domain
 
 The implementation should prefer least privilege and avoid unnecessary broad permissions.
@@ -317,13 +363,18 @@ The mock capability must support:
 - supporting rapid iteration during extension development
 - validating that payload structure matches the agreed contract
 
+TODO: Mock authentication on the mock side
+
 ## 12.1 Mocking Use Cases
 
 - verify that clicking the icon sends the correct payload
 - verify that using the keyboard shortcut sends the same payload structure
-- verify optional HTML capture
+- verify full HTML capture on supported pages
+- verify partial payloads when HTML capture is blocked
 - verify handling of 200, 400, 401, 500 and timeout scenarios
 - inspect headers and request body during development
+
+TODO: What are the cases `when HTML capture can be blocked`?
 
 ## 12.2 Contract Testing Recommendation
 
@@ -357,7 +408,7 @@ The extension should respond quickly to the user action and should not noticeabl
 
 ### 13.4 Privacy
 
-The product must recognise that HTML capture is materially more sensitive than URL-only capture. The implementation should default to the minimal safe payload unless there is a clear requirement for richer capture.
+The product must recognise that HTML capture is materially more sensitive than URL-only capture. The implementation should capture only the agreed contract fields, handle blocked capture explicitly, and control payload size and downstream use of HTML content.
 
 ### 13.5 Maintainability
 
@@ -387,6 +438,8 @@ The user should be able to:
 
 The implementation should consider lightweight feedback to the user, for example success or failure indication, but this is a secondary concern for the first iteration.
 
+TODO: Research best practice here - e.g. a success or error could be communicated via a single blink or change of the colour of the extension icon to green-is or red-ish colour / shade
+
 ### 14.3 Low Friction
 
 The user should not need to manually copy URLs or navigate away from the current page in order to capture it.
@@ -397,7 +450,8 @@ The user should not need to manually copy URLs or navigate away from the current
 - the extension is developed initially for local installation as unpacked
 - the backend exposes an HTTP endpoint that accepts JSON payloads
 - backend processing is handled elsewhere
-- the extension may need to evolve from URL-only capture to richer capture later
+- supported pages expose enough browser context to capture URL, title, and HTML
+- restricted pages may require a partial payload because HTML capture can be blocked
 - contract alignment between frontend extension and backend service is important for delivery confidence
 
 ## 16. Constraints
@@ -406,6 +460,8 @@ The user should not need to manually copy URLs or navigate away from the current
 - some browser pages cannot be read or injected into due to Chrome restrictions
 - the background service worker cannot access page DOM directly
 - large HTML payloads may affect performance and increase privacy risk
+
+TODO: Consider trimming content, and extracting text only for large pages
 
 ## 17. Risks and Mitigations
 
@@ -425,8 +481,9 @@ Capturing HTML may transmit more information than intended.
 
 Mitigation:
 
-- default to URL and title only in the initial release
-- make HTML capture explicit and controlled
+- constrain the payload to the agreed fields and schema version
+- define and validate partial payload behaviour for blocked capture
+- validate payload size, hashing, and downstream handling expectations
 - document privacy and security expectations clearly
 
 ### Risk 3. Restricted Browser Contexts
@@ -463,9 +520,10 @@ Mitigation:
 The first release will be considered successful when:
 
 - a user can install the extension locally in Chrome
-- clicking the extension icon sends the current page payload to a configured endpoint
-- using the keyboard shortcut sends the same payload to the configured endpoint
-- the local mock server can receive and display the payload for inspection
+- clicking the extension icon sends URL, title, HTML, trigger, captured timestamp, and schema version for supported HTML pages
+- using the keyboard shortcut sends the same full payload on supported HTML pages
+- when HTML capture is blocked, the extension sends a partial payload with capture status and failure reason
+- the local mock server can receive and display both full and partial payloads for inspection
 - the payload shape is documented and validated
 - the project has a defined approach for contract testing or equivalent schema verification
 
@@ -473,19 +531,19 @@ The first release will be considered successful when:
 
 ### AC1
 
-When the extension is installed and the user clicks the extension icon on a supported page, the extension sends a JSON POST request containing the current page URL to the configured endpoint.
+When the extension is installed and the user clicks the extension icon on a supported HTML page, the extension sends a JSON POST request containing `url`, `title`, `html`, `trigger`, `capturedAt`, and `schemaVersion` to the configured endpoint.
 
 ### AC2
 
-When the extension is installed and the user uses the keyboard shortcut on a supported page, the extension sends a JSON POST request using the same capture flow and schema.
+When the extension is installed and the user uses the keyboard shortcut on a supported HTML page, the extension sends a JSON POST request using the same capture flow and schema.
 
 ### AC3
 
-The payload includes at least the URL and should include title, trigger source and timestamp in the initial professional implementation.
+When HTML capture is blocked, the extension sends a partial JSON POST request containing `url`, `title` if available, `trigger`, `capturedAt`, `schemaVersion`, `captureStatus`, and `failureReason`.
 
 ### AC4
 
-Where HTML capture is enabled, the extension can send page HTML in the payload for supported pages.
+Where available and appropriate, the payload contract supports recommended metadata fields including canonical URL, language, meta description, site name, author, published date, HTML byte length, HTML hash, and extension version.
 
 ### AC5
 
@@ -507,18 +565,20 @@ A sensible phased delivery approach is:
 
 - create Chrome extension skeleton
 - implement icon click trigger
-- capture active tab URL
+- capture active tab URL, title, and HTML on supported pages
+- send a partial payload with capture status and failure reason when HTML capture is blocked
 - POST to local mock endpoint
 
 ### Phase 2. Unified Trigger Support
 
 - add keyboard shortcut
 - route both triggers through shared capture logic
-- include title, trigger source and timestamp
+- include trigger source, timestamp, and schema version in all payloads
 
-### Phase 3. Richer Capture
+### Phase 3. Recommended Metadata and Hardening
 
-- add optional HTML capture
+- add recommended metadata such as canonical URL, language, meta description, site name, author, and published date where available
+- add HTML byte length, HTML hash, and extension version
 - validate payload size and privacy considerations
 - improve feedback and error handling
 
@@ -530,12 +590,15 @@ A sensible phased delivery approach is:
 
 ## 21. Open Questions
 
-- Will the first production release send URL only, or URL plus title and metadata?
-- Is HTML capture required in the first release, or only designed for later enablement?
+- What size limit or truncation strategy should apply to HTML payloads?
+- Which page signals should be trusted for published date and author extraction?
 - How will environment-specific endpoint configuration be managed?
 - What authentication mechanism, if any, will be required by the backend?
+- Which hashing algorithm should be used for `htmlHash`?
 - What contract-testing approach will the wider programme standardise on?
 - Is any visible user feedback required in the first release beyond developer logging?
+
+TODO: Answer the questions
 
 ## 22. Appendix A: Suggested Initial Extension Structure
 
@@ -555,7 +618,8 @@ link-capture-extension/
 - Trigger by keyboard shortcut
 - Capture active tab URL
 - Capture title
-- Optionally capture HTML
+- Capture HTML for supported pages
+- Send a partial payload when HTML capture is blocked
 - POST JSON payload to REST API
 - Support local mocking
 - Consider contract testing
