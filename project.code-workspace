@@ -2,15 +2,15 @@
   "folders": [
     {
       "name": "Repository Template",
-      "path": ".",
+      "path": "."
     },
     {
       "name": "Scripts: Tooling",
-      "path": "./scripts/",
+      "path": "./scripts/"
     },
     {
       "name": "Documentation: ADRs",
-      "path": "./docs/adr",
-    },
-  ],
+      "path": "./docs/adr"
+    }
+  ]
 }

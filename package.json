@@ -1,0 +1,29 @@
+{
+  "name": "link-capture-browser-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension that captures the current tab URL and timestamp on demand",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc -p tsconfig.build.json",
+    "mock-server": "node dist/mock-server/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/node": "^25.5.0",
+    "chrome-types": "^0.1.425",
+    "fast-check": "^4.6.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
