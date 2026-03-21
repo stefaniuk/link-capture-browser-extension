@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Link Capture",
+  "version": "1.0.0",
+  "description": "Captures the current tab URL and timestamp on demand",
+  "permissions": ["activeTab", "tabs"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Capture Link"
+  },
+  "commands": {
+    "capture-link": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Capture current page link"
+    }
+  }
+}
