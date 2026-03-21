@@ -128,8 +128,14 @@ The extension shall authenticate to the backend API using OAuth 2.0 Authorizatio
 - The extension sends API requests with `Authorization: Bearer <access-token>` over HTTPS.
 - The extension does not embed a client secret or long-lived shared API key.
 - The default first-release authorization server shall be Keycloak, with separate realms and public client registrations for `local`, `non-production`, and `production`.
+- The default first-release scope set shall be `openid profile link-capture.write`.
+- The default first-release audience shall be `link-capture-api` when the selected environment requires an explicit audience parameter.
 - The authorization server shall issue rotating refresh tokens with bounded lifetime for `non-production` and `production`, and the extension shall require re-authentication whenever refresh is unavailable or fails.
 - Refresh tokens must be rotating, bounded in lifetime, revocable, and handled with minimal persistence.
+- Access tokens must be stored only in memory or `chrome.storage.session`.
+- Refresh tokens must be persisted only in `chrome.storage.local` for the active environment so the authenticated session can survive browser restarts.
+- Access tokens must never be stored in `chrome.storage.local` or `chrome.storage.sync`, and refresh tokens must never be stored in `chrome.storage.sync`.
+- All stored tokens must be cleared on sign-out, active-environment change, refresh failure, and authorization-server rejection.
 
 This decision is reversible if the backend security model changes materially or if a different platform-supported authentication pattern becomes necessary.
 
@@ -156,11 +162,13 @@ The diagram below describes the full OAuth 2.0 Authorization Code Flow with PKCE
 7. **State validation** — the service worker verifies that the returned `state` matches the value it sent in step 3 to guard against CSRF attacks.
 8. **Token exchange** — the service worker sends a POST request directly to the authorisation server's token endpoint, providing the `authorization_code`, the original `code_verifier`, the `client_id`, `redirect_uri`, and `grant_type=authorization_code`. Because the extension is a public client, no `client_secret` is included.
 9. **Token response** — the authorisation server validates the code and the PKCE `code_verifier` against the previously received `code_challenge`. If valid, it returns a short-lived `access_token` and, if the server policy permits, a `refresh_token`.
-10. **Token storage** — the service worker stores the tokens in memory (or `chrome.storage.session` for service-worker lifecycle resilience). Tokens are never written to `chrome.storage.local` or `chrome.storage.sync` to limit persistence and exposure.
+10. **Token storage** — the service worker stores access tokens in memory (or `chrome.storage.session` for service-worker lifecycle resilience) and persists refresh tokens in `chrome.storage.local` for the active environment so authentication can survive browser restarts. Access tokens are never written to `chrome.storage.local` or `chrome.storage.sync`, and refresh tokens are never written to `chrome.storage.sync`.
 11. **Authenticated API request** — for each API call the service worker attaches the access token as `Authorization: Bearer <access_token>` over HTTPS.
 12. **API response** — the backend API validates the bearer token (signature, expiry, audience, scopes) and returns the response. If the token is invalid or expired, the API responds with `401 Unauthorized`.
-13. **Token refresh (when access token expires)** — if the API returns `401` and a refresh token is available, the service worker sends a token refresh request to the authorisation server's token endpoint with `grant_type=refresh_token` and the current `refresh_token`. The authorisation server returns a new `access_token` and, if rotating refresh tokens are enabled, a new `refresh_token`. The service worker retries the original API request with the new access token.
+13. **Token refresh (when access token expires)** — if the API returns `401` and a refresh token is available, the service worker sends a token refresh request to the authorisation server's token endpoint with `grant_type=refresh_token` and the current `refresh_token`. The authorisation server returns a new `access_token` and, if rotating refresh tokens are enabled, a new `refresh_token`. The service worker replaces the persisted refresh token for the active environment and retries the original API request with the new access token.
 14. **Re-authentication (when refresh is unavailable or fails)** — if no refresh token exists, or the refresh request fails (for example because the refresh token has been revoked or has expired), the service worker clears all stored tokens and prompts the user to sign in again by repeating the flow from step 1.
+
+15. **Browser restart continuity** — after a full browser restart, the service worker restores the authenticated session for the active environment by loading the persisted refresh token from `chrome.storage.local` and exchanging it for a new access token before the next protected API request. If that refresh fails, the service worker clears the stored refresh token and requires interactive sign-in.
 
 ```mermaid
 sequenceDiagram
@@ -209,7 +217,7 @@ sequenceDiagram
     AuthZ-->>Ext: {access_token, token_type=Bearer,<br/>expires_in, refresh_token (if policy allows)}
     deactivate AuthZ
 
-    Ext->>Ext: Store tokens in memory /<br/>chrome.storage.session
+    Ext->>Ext: Store access token in memory /<br/>chrome.storage.session and persist<br/>refresh token in chrome.storage.local
 
     Ext-->>User: Sign-in complete
     deactivate Ext
@@ -276,7 +284,8 @@ Option A best matches both the Chrome extension platform and OAuth security guid
 - The extension will need Chrome Identity API integration and redirect URI registration.
 - The manifest will need the `identity` permission and environment-specific auth configuration.
 - The mock environment must simulate authenticated, unauthenticated, expired-token, and insufficient-scope responses.
-- The team still needs a follow-up decision on the exact scopes for each environment.
+- The backend and identity-provider configuration must keep the selected scope set and audience aligned across environments.
+- The implementation must restore the authenticated session after browser restart by using the persisted refresh token for the active environment.
 
 This decision no longer applies if the backend stops using user-scoped API authorization, or if the platform shifts to a materially different supported authentication mechanism.
 
@@ -286,18 +295,19 @@ Compliance is met when:
 
 - The PRD requires OAuth 2.0 Authorization Code Flow with PKCE for API authentication.
 - The PRD and future implementation artefacts prohibit embedded client secrets and long-lived shared API keys.
-- Mock and automated tests cover success, missing-token, expired-token, and insufficient-scope cases.
+- The PRD and future implementation artefacts distinguish non-persistent access-token storage from persisted refresh-token storage.
+- Mock and automated tests cover success, missing-token, expired-token, insufficient-scope, and browser-restart session-restoration cases.
 
 Validation approach:
 
 - Run in local development and CI.
-- Check the PRD, authentication configuration, and future tests for consistency with this ADR.
+- Check the PRD, authentication configuration, token-storage implementation, and future tests for consistency with this ADR.
 - Produce evidence through lint output and authentication-related test cases.
 
 Local command:
 
 ```bash
-rg -n "Authorization Code Flow|PKCE|client secret|shared API key|Authorization: Bearer|identity" docs/prd.md docs/adr/ADR-002_Extension_API_Authentication.md && make lint
+rg -n "Authorization Code Flow|PKCE|client secret|shared API key|Authorization: Bearer|chrome.storage.local|chrome.storage.session|browser restart" docs/prd.md docs/adr/ADR-002_Extension_API_Authentication.md && make lint
 ```
 
 ## Notes 🔗
@@ -311,8 +321,9 @@ rg -n "Authorization Code Flow|PKCE|client secret|shared API key|Authorization: 
 
 - [x] Dan, 2026-03-20, make API authentication an explicit PRD requirement
 - [x] Dan, 2026-03-20, select Keycloak as the default identity provider for each environment, with separate realms and client registrations
-- [ ] Dan, TBD, define the exact scopes for each environment
+- [x] Dan, 2026-03-20, define the exact first-release scopes for each environment
 - [x] Dan, 2026-03-20, define the refresh token policy for the extension
+- [x] Dan, 2026-03-21, define browser-restart session restoration using a persisted refresh token
 
 ## Tags 🏷️
 

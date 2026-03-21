@@ -23,7 +23,7 @@ The extension must allow the user to send the current page information by either
 - clicking the extension icon in Chrome
 - using a keyboard shortcut
 
-The extension must support sending the current page URL, page title, and page HTML to a backend REST endpoint for supported HTML pages. Where HTML capture is blocked by browser restrictions or page type, the extension must still send a partial payload containing the available metadata plus explicit capture status and failure reason fields.
+The extension must support sending the current page URL, page title, and page HTML to a backend REST endpoint for supported HTML pages. Where HTML capture is blocked by browser restrictions or page type but the page URL remains available, the extension must still send a partial payload containing the available metadata plus explicit capture status and failure reason fields. If the page URL is not available, the extension must fail explicitly and must not send a payload.
 
 The extension must authenticate to the backend API using OAuth 2.0 Authorization Code Flow with PKCE, with the extension acting as a public client and sending bearer access tokens over HTTPS.
 
@@ -133,7 +133,7 @@ The product will include:
 - retrieval of the active tab title where available
 - retrieval of page HTML for supported pages
 - authenticated POST submission of payload data to a configured REST API endpoint
-- partial payload submission when HTML capture is blocked
+- partial payload submission when HTML capture is blocked and the page URL remains available
 - user authentication and token acquisition for backend API access
 - JSON-safe serialisation of captured page content, including embedded script markup contained within captured HTML
 - local development support using an unpacked extension
@@ -171,6 +171,11 @@ When triggered, the system shall identify the currently active tab in the focuse
 
 The system shall capture the URL of the active page, where Chrome permissions and page type allow access.
 
+Notes:
+
+- The page URL is mandatory for every payload sent to the backend.
+- If the page URL cannot be read, the capture attempt shall fail explicitly with a documented failure reason, for example `url_unavailable`, and no payload shall be submitted.
+
 ### FR5. Capture Title
 
 The system shall capture the page title as part of the payload where it is available.
@@ -182,7 +187,8 @@ The system shall capture the page HTML content in addition to the URL and title 
 Notes:
 
 - HTML capture is expected to use page-context execution rather than direct access from the background service worker.
-- When HTML capture is blocked, the system shall send a partial payload with the required fallback fields defined by the payload contract.
+- When HTML capture is blocked and the page URL is available, the system shall send a partial payload with the required fallback fields defined by the payload contract.
+- When the page URL is unavailable, the system shall fail explicitly and shall not submit a partial payload.
 - Any JavaScript present within the captured page source shall be treated as plain text inside the HTML string and shall not be executed, evaluated, or transformed as part of payload construction.
 
 ### FR7. Submit Payload to REST API
@@ -207,7 +213,11 @@ Notes:
 - The extension shall not collect user credentials directly in extension UI or embedded web views.
 - The extension shall send a valid bearer access token in the `Authorization` header for authenticated API requests.
 - The extension shall not embed a client secret or long-lived shared API key in the extension package.
-- If refresh tokens are issued, they shall be rotating, short-lived, revocable, and handled with the least persistent storage practical for the implementation.
+- If refresh tokens are issued, they shall be rotating, bounded in lifetime, revocable, and used to restore the authenticated session across browser restarts.
+- Access tokens shall be stored only in memory or `chrome.storage.session`.
+- Persisted refresh tokens shall be stored only in `chrome.storage.local` for the active environment.
+- The default first-release requested scopes shall be `openid profile link-capture.write`.
+- The default first-release audience shall be `link-capture-api` when the selected environment requires an explicit audience parameter.
 
 ### FR9. Include Capture Metadata
 
@@ -222,7 +232,7 @@ Required on supported HTML pages:
 - timestamp of capture
 - schema version
 
-Required when HTML capture is blocked:
+Required when HTML capture is blocked and the page URL is available:
 
 - URL
 - page title, if available
@@ -259,6 +269,15 @@ Notes:
 
 The system shall handle API failures gracefully and log or surface errors in a way that supports development and troubleshooting.
 
+Notes:
+
+- The first release shall distinguish between partial capture outcomes that are still submitted and explicit failures that stop submission.
+- Explicit failures shall produce deterministic local feedback and logging with a documented failure reason.
+- Capture submission requests shall use a `10` second timeout.
+- Token exchange and token refresh requests shall use a `10` second timeout after the browser-mediated redirect has completed.
+- The first release shall not automatically retry timed-out or failed POST submissions, except for exactly one retry after a successful token refresh following a `401 Unauthorized` response.
+- `400`, `403`, `500`, network errors, and request timeouts shall be terminal failure outcomes for the current capture attempt.
+
 ### FR11. Support Local Mock Endpoint
 
 The system shall support configuration that allows the payload to be sent to a local mock server during development and test.
@@ -273,6 +292,9 @@ The system shall handle cases where the active tab does not expose a readable UR
 
 Notes:
 
+- If the active tab does not expose a readable URL, the system shall treat the capture attempt as an explicit failure, shall not send a payload, and shall surface a documented failure reason such as `url_unavailable`.
+- If the active tab becomes unavailable before capture completes, the system shall treat the capture attempt as an explicit failure, shall not send a payload, and shall surface a documented failure reason such as `tab_unavailable`.
+- If the page URL is readable but HTML capture is blocked, the system shall send a partial payload rather than failing silently.
 - HTML capture can be blocked on browser-internal or otherwise protected pages, for example `chrome://` pages and other browser-owned surfaces that do not allow content script injection.
 - HTML capture can be blocked when the page uses a URL scheme that is not directly injectable through standard match patterns, for example top-level `about:`, `data:`, `blob:`, or `filesystem:` pages.
 - HTML capture can be blocked on `file://` pages when the user has not granted file URL access to the extension.
@@ -289,7 +311,7 @@ Notes:
 - The first-release feedback mechanism shall use the Chrome action badge and action tooltip.
 - Badge text shall use four or fewer characters, for example `OK` for successful full capture, `PART` for successful partial capture, and `ERR` for submission or capture failure.
 - The action tooltip shall be updated with a short plain-language status message that mirrors the badge meaning.
-- Badge and tooltip feedback shall clear automatically after a short interval so stale status is not left on the action.
+- Badge and tooltip feedback shall clear automatically after `5` seconds so stale status is not left on the action.
 - Colour may be used as a supplementary cue on the badge background, but colour shall not be the only indicator of outcome.
 - Animated icon changes or blinking shall not be the primary feedback mechanism.
 - System notifications shall not be used for routine success feedback in the first release.
@@ -322,6 +344,34 @@ The first-release payload when HTML capture is blocked is:
 }
 ```
 
+If the page URL cannot be read, the extension shall not send a payload. Instead, it shall return an explicit local failure outcome with a documented failure reason such as `url_unavailable`.
+
+## 10.1 First-Release Outcome Vocabulary
+
+Submitted partial payloads shall use the following fixed first-release vocabulary:
+
+- `captureStatus`: `partial`
+- `failureReason`: `html_capture_blocked`
+
+Explicit local failures shall not emit a backend payload. The allowed first-release local failure reasons are:
+
+- `url_unavailable`
+- `tab_unavailable`
+- `payload_too_large`
+- `serialization_failed`
+- `auth_interaction_required`
+- `auth_refresh_failed`
+- `submission_timeout`
+- `submission_rejected`
+- `insufficient_scope`
+- `capture_in_progress`
+
+Local terminal outcome statuses shall use the following fixed values:
+
+- `success_full`
+- `success_partial`
+- `failure`
+
 Extended metadata fields are part of the payload contract when the `extendedFields` configuration option is enabled. This option shall default to `false`. When enabled, both full and partial payload shapes shall include the complete extended metadata block below. If a value cannot be derived reliably, the field shall be sent with a `null` value.
 
 - `canonicalUrl`
@@ -345,12 +395,12 @@ Example extended metadata block when `extendedFields` is enabled:
   "author": null,
   "publishedDate": null,
   "htmlByteLength": 18234,
-  "htmlHash": "sha256:abc123",
+  "htmlHash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "extensionVersion": "1.0.0"
 }
 ```
 
-## 10.1 Payload Design Principles
+## 10.2 Payload Design Principles
 
 - JSON over HTTP POST
 - stable and versionable
@@ -360,9 +410,18 @@ Example extended metadata block when `extendedFields` is enabled:
 - safe serialisation of captured content as JSON string data without executing embedded markup or scripts
 - suitable for schema validation and contract testing
 
-## 10.2 Contract Considerations
+## 10.3 Contract Considerations
 
 The payload contract shall be documented formally and expressed in a machine-readable format. For this project, the authoritative executable contract shall be a shared, versioned JSON Schema. If OpenAPI documentation is added later, it should reference the same schema rather than duplicate the contract rules.
+
+The first-release schema semantics shall be:
+
+- `schemaVersion` is an exact-match literal with the value `1.0.0`.
+- Validation shall reject unknown top-level payload properties that are not defined by the selected first-release schema branch.
+- When `extendedFields` is `false`, all extended metadata fields shall be omitted from the payload.
+- When `extendedFields` is `true`, all extended metadata fields shall be present.
+- When `extendedFields` is `true`, any extended metadata field that cannot be derived reliably shall use `null` rather than omission.
+- In partial payloads, `title` shall be omitted when unavailable rather than being set to `null`.
 
 The contract should define:
 
@@ -413,6 +472,13 @@ Initial permissions are expected to include only what is necessary, likely inclu
 
 The implementation should prefer least privilege and avoid unnecessary broad permissions.
 
+Permission model requirements:
+
+- First-release page capture shall rely on `activeTab`, `tabs`, and `scripting` rather than broad persistent host permissions for arbitrary web pages.
+- Static `host_permissions` shall be limited to the configured backend API origins and identity-provider origins for `local`, `non-production`, and `production`.
+- The first release shall not request optional host permissions for arbitrary websites at runtime.
+- Access to `file://` pages shall rely on Chrome's explicit file-URL access setting rather than an extension-managed permission prompt.
+
 ### 11.4 Authentication
 
 The backend API authentication model shall use standards-based OAuth 2.0 or OpenID Connect with Authorization Code Flow and PKCE.
@@ -425,6 +491,14 @@ The implementation shall:
 - avoid embedded client secrets, static shared API keys, and extension-managed password collection
 - use Keycloak as the default first-release OpenID Connect provider, with separate realms and public client registrations for `local`, `non-production`, and `production`
 - use short-lived access tokens, with rotating refresh tokens enabled for `non-production` and `production` and full re-authentication required whenever refresh is unavailable, revoked, expired, or otherwise fails
+- request the first-release scope set `openid profile link-capture.write`
+- use the first-release audience `link-capture-api` when an audience parameter is required by the selected environment
+- store access tokens only in memory or `chrome.storage.session`
+- persist refresh tokens only in `chrome.storage.local` for the active environment
+- never store access tokens in `chrome.storage.local` or `chrome.storage.sync`
+- never store refresh tokens in `chrome.storage.sync`
+- restore the authenticated session after browser restart by exchanging the persisted refresh token for a new access token when the refresh token remains valid
+- clear all stored tokens on explicit sign-out, active-environment change, refresh failure, and authorization-server rejection
 
 ### 11.5 Local Installation and Development
 
@@ -457,6 +531,9 @@ Configuration handling requirements:
 - The `extendedFields` setting shall be persisted in `chrome.storage.local`.
 - The setting shall be managed through a minimal Chrome extension options page rather than a rich settings UI.
 - If the setting is missing from storage, the implementation shall default it to `false`.
+- If the selected environment key is missing, invalid, or unknown, the implementation shall default it to `local` and log a configuration warning.
+- Within the `local` profile, manual endpoint and issuer overrides shall take precedence over bundled local-profile values only when the overrides are non-empty and valid.
+- Changing the active environment shall clear any stored access token or refresh token for the previous environment and terminate any in-flight capture state for the current browser session.
 - The background service worker shall read the effective setting through a configuration boundary rather than embedding the value directly in capture logic.
 
 This shall be achieved through the bundled configuration map and a minimal extension options mechanism for selecting the active environment.
@@ -472,7 +549,21 @@ Unit-testable behaviour shall include at minimum:
 - authentication decision logic, including missing-token and expired-token handling
 - submission error handling and retry decisions where implemented
 
-### 11.8 Payload Encoding
+### 11.8 Runtime Execution Model
+
+Runtime execution requirements:
+
+- Capture state shall be tracked per tab.
+- The first-release per-tab state model shall be `idle`, `capturing`, `authenticating`, `submitting`, `succeeded_full`, `succeeded_partial`, and `failed`.
+- Only one active capture shall be allowed per tab at a time.
+- If the user triggers capture again for the same tab while that tab is already in a non-terminal capture state, the extension shall ignore the new trigger, keep the existing capture running, and return an explicit local failure reason of `capture_in_progress` for the ignored trigger.
+- Separate tabs may progress through capture independently.
+- The action badge and tooltip shall only be updated for terminal outcomes in the first release. No dedicated in-progress badge or tooltip state is required.
+- After the `5` second feedback-clear interval, the tab shall return to the `idle` state.
+- Capture submission requests, token exchange requests, and token refresh requests shall each use a `10` second timeout.
+- The first release shall not automatically retry timed-out or failed POST submissions, except for exactly one retry after a successful token refresh following a `401 Unauthorized` response.
+
+### 11.9 Payload Encoding
 
 The implementation shall encode captured page content so that it can be transmitted safely in a JSON request body without changing the semantic content of the captured page source.
 
@@ -495,10 +586,10 @@ Oversized payload handling requirements:
 - The default first-release maximum HTML payload size shall be `1 MiB` (`1,048,576` bytes), measured as the UTF-8 byte length of the captured `html` string before submission.
 - If the captured HTML exceeds the configured maximum size, the extension shall not silently trim the HTML string.
 - If the captured HTML exceeds the configured maximum size, the extension shall not replace the `html` field with extracted text, reader-mode output, or other derived content while still treating the result as a normal full capture.
-- Oversized capture shall be handled through an explicit failure or partial-capture path with a documented failure reason, for example `payload_too_large`.
+- Oversized capture shall be handled through an explicit failure path with a documented failure reason, for example `payload_too_large`.
 - Any maximum-size threshold shall be reflected consistently in the PRD, schema, mock behaviour, and automated tests.
 
-### 11.9 Contract Testing
+### 11.11 Contract Testing
 
 Contract testing shall be mandatory for the integration between the extension and the backend API.
 
@@ -529,13 +620,15 @@ The mock capability must support:
 - verify that clicking the icon sends the correct payload
 - verify that using the keyboard shortcut sends the same payload structure
 - verify full HTML capture on supported pages
-- verify partial payloads when HTML capture is blocked
+- verify partial payloads when HTML capture is blocked and the page URL is available
+- verify explicit failure handling when the page URL cannot be read and no payload is sent
 - verify that the extension can complete browser-mediated sign-in and send authenticated requests
 - verify handling of 200, 400, 401, 500 and timeout scenarios
 - verify handling of 403 responses caused by missing or insufficient scope
+- verify explicit failure handling when captured HTML exceeds the maximum payload size
 - inspect headers and request body during development
 
-HTML capture should be treated as blocked, and therefore should trigger partial-payload behaviour, in at least the following cases:
+HTML capture should be treated as blocked, and therefore should trigger partial-payload behaviour when the page URL remains available, in at least the following cases:
 
 - the active tab is a browser-internal or protected page where script injection is disallowed
 - the active tab uses an unsupported or non-matchable top-level URL scheme for standard injection
@@ -556,6 +649,31 @@ Required principles:
 - validate example payloads in automated tests
 - include both positive and negative cases
 - fail CI when the consumer and provider drift apart
+
+## 12.3 Mock Response Contract
+
+The first-release mock server shall expose deterministic scenario endpoints for extension development and automated tests:
+
+- `POST /captures`: success scenario returning `200 OK`
+- `POST /captures/400`: bad-request scenario returning `400 Bad Request`
+- `POST /captures/401`: unauthorized scenario returning `401 Unauthorized`
+- `POST /captures/403`: insufficient-scope scenario returning `403 Forbidden`
+- `POST /captures/500`: server-error scenario returning `500 Internal Server Error`
+- `POST /captures/timeout`: timeout scenario that delays response for `15` seconds so that the extension's `10` second client timeout is exercised deterministically
+
+Mock response body requirements:
+
+- `POST /captures` shall return `200` with JSON body `{ "result": "accepted", "captureId": "mock-capture-001" }`.
+- `POST /captures/400` shall return `400` with JSON body `{ "error": "bad_request", "message": "mock_bad_request" }`.
+- `POST /captures/401` shall return `401` with JSON body `{ "error": "unauthorized", "message": "missing_or_invalid_token" }`.
+- `POST /captures/403` shall return `403` with JSON body `{ "error": "forbidden", "message": "insufficient_scope" }`.
+- `POST /captures/500` shall return `500` with JSON body `{ "error": "server_error", "message": "mock_internal_error" }`.
+- `POST /captures/timeout` shall not return a response within the extension timeout window.
+
+Header validation requirements:
+
+- All mock scenario endpoints except `POST /captures/401` shall require an `Authorization: Bearer <token>` header for authenticated scenarios.
+- If the required `Authorization` header is missing or malformed, the mock server shall return the `401` response shape defined above before applying the selected scenario response.
 
 ## 13. Non-Functional Requirements
 
@@ -605,16 +723,22 @@ The user should be able to:
 - click the extension icon to send the current page
 - use a keyboard shortcut to send the current page
 
+Invocation defaults:
+
+- The first-release manifest command identifier shall be `capture-current-page`.
+- The first release shall not declare a suggested default keyboard accelerator in the manifest.
+- If the command is unbound, capture remains available through the extension icon and the user may bind the shortcut through Chrome's extensions shortcuts UI.
+
 ### 14.2 Feedback
 
 The first release should provide lightweight feedback through the Chrome action rather than through a rich popup or routine system notifications.
 
-Recommended first-release behaviour:
+First-release feedback behaviour shall:
 
 - show a transient per-tab action badge after each capture attempt
 - use short badge text such as `OK`, `PART`, or `ERR`
 - update the action tooltip with a plain-language status message
-- clear the temporary status automatically after a short interval
+- clear the temporary status automatically after `5` seconds
 - use badge background colour only as a supplementary cue, not as the sole indicator of meaning
 
 The implementation should avoid blinking or animated icon changes as the main status signal.
@@ -625,12 +749,13 @@ The user should not need to manually copy URLs or navigate away from the current
 
 ### 14.4 Configuration UX
 
-The extension may expose a minimal Chrome options page for required configuration, including the `extendedFields` toggle and environment-specific integration settings.
+The extension shall expose a minimal Chrome options page for required configuration, including the `extendedFields` toggle and environment-specific integration settings.
 
 The configuration UX should:
 
 - remain lightweight and focused on required settings only
 - clearly show that `extendedFields` is disabled by default
+- allow selection of the active environment from `local`, `non-production`, and `production`
 - explain that enabling `extendedFields` increases the amount of metadata sent to the backend API
 
 ## 15. Assumptions
@@ -640,7 +765,7 @@ The configuration UX should:
 - the backend exposes an HTTP endpoint that accepts JSON payloads
 - backend processing is handled elsewhere
 - supported pages expose enough browser context to capture URL, title, and HTML
-- restricted pages may require a partial payload because HTML capture can be blocked
+- restricted pages may require a partial payload when the page URL is available and HTML capture is blocked, or an explicit failure when the page URL is unavailable
 - contract alignment between frontend extension and backend service is important for delivery confidence
 
 ## 16. Constraints
@@ -711,16 +836,20 @@ The first release will be considered successful when:
 - a user can install the extension locally in Chrome
 - clicking the extension icon sends an authenticated request containing URL, title, HTML, trigger, captured timestamp, and schema version for supported HTML pages
 - using the keyboard shortcut sends the same authenticated full payload on supported HTML pages
-- when HTML capture is blocked, the extension sends an authenticated partial payload with capture status and failure reason
+- when HTML capture is blocked and the page URL is available, the extension sends an authenticated partial payload with capture status and failure reason
+- when the page URL is unavailable, the extension sends no payload and returns an explicit failure outcome with a documented failure reason
 - the extension can obtain a valid access token through a browser-mediated OAuth flow without asking the user to enter credentials into extension UI
 - the local mock server can receive and display both full and partial payloads and inspect the authentication header for inspection
 - the core extension logic can be verified through automated unit tests without depending on a live Chrome browser session
 - captured HTML can be transmitted in a valid JSON request body without executing or corrupting embedded markup or script content
 - the user can enable or disable `extendedFields` through a minimal Chrome options page, with the setting persisted locally and defaulting to `false`
+- the user can select the active environment through the options page, with only the selected environment key persisted in `chrome.storage.local` and all other integration settings derived from the bundled configuration map
 - the user receives lightweight capture feedback through a transient action badge and tooltip, without relying on colour alone
+- submission, token exchange, and token refresh behaviour follows the documented `10` second timeout policy, with no automatic submission retry other than one retry after successful token refresh following `401 Unauthorized`
+- access tokens are stored only in memory or `chrome.storage.session`, refresh tokens are persisted only in `chrome.storage.local` for the active environment, and the extension restores the authenticated session after browser restart when the refresh token remains valid
 - the payload shape is documented and validated
 - mandatory schema-based contract testing runs in CI and prevents consumer/provider schema drift
-- oversized HTML capture is handled explicitly, without silently trimming source HTML or replacing it with extracted text
+- oversized HTML capture is handled as an explicit failure, without silently trimming source HTML or replacing it with extracted text
 
 ## 19. Acceptance Criteria
 
@@ -734,51 +863,95 @@ When the extension is installed and the user uses the keyboard shortcut on a sup
 
 ### AC3
 
-When HTML capture is blocked, the extension sends an authenticated partial JSON POST request containing `url`, `title` if available, `trigger`, `capturedAt`, `schemaVersion`, `captureStatus`, and `failureReason`.
+When HTML capture is blocked and the page URL is available, the extension sends an authenticated partial JSON POST request containing `url`, `title` if available, `trigger`, `capturedAt`, `schemaVersion`, `captureStatus`, and `failureReason`.
 
 ### AC4
 
-When no valid access token is available, the extension initiates a browser-mediated OAuth 2.0 Authorization Code Flow with PKCE, obtains a bearer access token, and does not ask the user to enter credentials directly into extension UI.
+When the active tab does not expose a readable URL, the extension does not send a payload and instead returns an explicit failure outcome with a documented failure reason such as `url_unavailable`.
 
 ### AC5
 
-The extension uses the `Authorization: Bearer` header for API requests and does not include an embedded client secret or long-lived shared API key in the distributed extension package.
+When no valid access token is available, the extension initiates a browser-mediated OAuth 2.0 Authorization Code Flow with PKCE, obtains a bearer access token, and does not ask the user to enter credentials directly into extension UI.
 
 ### AC6
 
-When the `extendedFields` configuration option is `false`, the payload omits the extended metadata block. When `extendedFields` is `true`, the payload includes canonical URL, language, meta description, site name, author, published date, HTML byte length, HTML hash, and extension version, using `null` for any field that cannot be derived reliably.
+The extension uses the `Authorization: Bearer` header for API requests and does not include an embedded client secret or long-lived shared API key in the distributed extension package.
 
 ### AC7
 
-The extension provides a minimal Chrome options page where the user can view and change the `extendedFields` setting, with the value persisted in `chrome.storage.local` and defaulting to `false` when unset.
+When the `extendedFields` configuration option is `false`, the payload omits the extended metadata block. When `extendedFields` is `true`, the payload includes canonical URL, language, meta description, site name, author, published date, HTML byte length, HTML hash, and extension version, using `null` for any field that cannot be derived reliably.
 
 ### AC8
 
-The extension can be configured to target a local mock endpoint for development.
+The extension provides a minimal Chrome options page where the user can view and change the `extendedFields` setting, choose the active environment from `local`, `non-production`, and `production`, and persist those selections in `chrome.storage.local`, with `extendedFields` defaulting to `false` when unset.
 
 ### AC9
 
-The local mock endpoint can be used to inspect the request body and authentication header and simulate success and failure responses.
+When `non-production` or `production` is selected, the extension derives endpoint and authentication settings from the bundled configuration map and does not expose manual endpoint or issuer overrides. When `local` is selected, the extension may expose manual endpoint and issuer overrides for developer use.
 
 ### AC10
 
-A documented, versioned JSON Schema exists for the payload, and automated contract tests validate both extension-emitted payloads and backend request handling against the same schema in CI.
+The extension can be configured to target a local mock endpoint for development.
 
 ### AC11
 
-The extension code is structured so that automated unit tests can verify core capture orchestration, payload construction, authentication decision logic, and submission error handling without requiring a live Chrome browser session.
+The local mock endpoint can be used to inspect the request body and authentication header and simulate success and failure responses.
 
 ### AC12
 
-When the extension captures HTML containing quotation marks, line breaks, Unicode characters, or embedded `<script>` content, it serialises that content into a valid JSON request body using standard JSON encoding without executing or mutating the captured page source.
+A documented, versioned JSON Schema exists for the payload, and automated contract tests validate both extension-emitted payloads and backend request handling against the same schema in CI.
 
 ### AC13
 
-After each capture attempt, the extension shows a transient per-tab action badge with brief status text and updates the action tooltip with a matching plain-language message. Any colour used in the badge is supplementary and not the sole indicator of outcome.
+The extension code is structured so that automated unit tests can verify core capture orchestration, payload construction, authentication decision logic, and submission error handling without requiring a live Chrome browser session.
 
 ### AC14
 
-When the captured HTML exceeds the configured maximum payload size, the extension does not silently trim the HTML or replace it with extracted text. It produces an explicit failure or partial-capture outcome with a documented failure reason such as `payload_too_large`.
+When the extension captures HTML containing quotation marks, line breaks, Unicode characters, or embedded `<script>` content, it serialises that content into a valid JSON request body using standard JSON encoding without executing or mutating the captured page source.
+
+### AC15
+
+After each capture attempt, the extension shows a transient per-tab action badge with four or fewer characters, updates the action tooltip with a matching plain-language message, and clears both badge and tooltip feedback automatically after `5` seconds. Any colour used in the badge is supplementary and not the sole indicator of outcome.
+
+### AC16
+
+When the captured HTML exceeds the configured maximum payload size, the extension does not silently trim the HTML or replace it with extracted text. It produces an explicit failure outcome with a documented failure reason such as `payload_too_large` and does not send a payload.
+
+### AC17
+
+When a capture submission request, token exchange request, or token refresh request exceeds `10` seconds, the current capture attempt fails explicitly. The extension performs no automatic retry except for exactly one retry of the original capture request after a successful token refresh following `401 Unauthorized`.
+
+### AC18
+
+The extension allows only one active capture per tab. When the user triggers capture again for the same tab while that tab is already in `capturing`, `authenticating`, or `submitting`, the extension does not queue or start a second capture and returns the explicit local failure reason `capture_in_progress` for the ignored trigger.
+
+### AC19
+
+Access tokens are stored only in memory or `chrome.storage.session`. Refresh tokens are persisted only in `chrome.storage.local` for the active environment so the authenticated session can survive browser restarts. Access tokens are never written to `chrome.storage.local` or `chrome.storage.sync`, refresh tokens are never written to `chrome.storage.sync`, and all stored tokens are cleared on explicit sign-out, active-environment change, refresh failure, and authorization-server rejection.
+
+### AC20
+
+The first-release shared JSON Schema requires an exact `schemaVersion` of `1.0.0`, rejects unknown top-level payload properties, omits all extended metadata fields when `extendedFields` is `false`, requires all extended metadata fields when `extendedFields` is `true`, and omits partial-payload `title` when it is unavailable.
+
+### AC21
+
+When the selected environment key is missing, invalid, or unknown, the extension defaults to `local` and logs a configuration warning. In the `local` profile, non-empty valid manual endpoint and issuer overrides take precedence over bundled local-profile values.
+
+### AC22
+
+The extension uses `activeTab`, `tabs`, `scripting`, and `identity`, plus static `host_permissions` only for the configured backend API and identity-provider origins. It does not request broad host permissions for arbitrary web pages.
+
+### AC23
+
+The first-release mock server exposes deterministic scenario endpoints at `/captures`, `/captures/400`, `/captures/401`, `/captures/403`, `/captures/500`, and `/captures/timeout`, with the response bodies and timeout behaviour defined in this PRD.
+
+### AC24
+
+The first-release authentication configuration requests the scopes `openid profile link-capture.write` and uses the audience `link-capture-api` when the selected environment requires an explicit audience parameter.
+
+### AC25
+
+After a full browser restart, if a valid refresh token exists for the active environment, the extension restores an authenticated session without requiring interactive sign-in by exchanging the persisted refresh token for a new access token before submission.
 
 ## 20. Delivery Approach
 
@@ -791,13 +964,17 @@ A sensible phased delivery approach is:
 - add a minimal Chrome options page for required extension configuration
 - implement icon click trigger
 - capture active tab URL, title, and HTML on supported pages
-- send a partial payload with capture status and failure reason when HTML capture is blocked
+- send a partial payload with capture status and failure reason when HTML capture is blocked and the page URL is available
+- return an explicit failure and send no payload when the page URL is unavailable
 - POST to local mock endpoint
 
 ### Phase 2. Authenticated Submission
 
 - implement browser-mediated OAuth 2.0 Authorization Code Flow with PKCE
 - obtain bearer access tokens and attach them to API requests
+- store access tokens only in memory or `chrome.storage.session`, persist refresh tokens only in `chrome.storage.local` for the active environment, and clear both on the documented purge events
+- restore the authenticated session after browser restart when a valid persisted refresh token exists
+- request the first-release scope set `openid profile link-capture.write`, with audience `link-capture-api` where required
 - simulate authentication success, 401, and 403 responses in the mock environment
 
 ### Phase 3. Unified Trigger Support
@@ -811,14 +988,18 @@ A sensible phased delivery approach is:
 - add the `extendedFields` configuration option, defaulting to `false`, stored in `chrome.storage.local`
 - populate the full extended metadata block when `extendedFields` is enabled
 - include `null` for extended metadata fields that cannot be derived reliably
+- define the per-tab runtime state model and ignore duplicate same-tab triggers while a capture is already in progress
 - validate JSON serialisation of captured HTML, including embedded script markup and special characters
 - implement transient action badge and tooltip feedback for `OK`, `PART`, and `ERR` outcomes
+- implement the documented `10` second timeout policy and single refresh-driven retry rule
 - define and validate maximum HTML payload size handling, including explicit oversized-payload failure behaviour
+- define and validate explicit failure handling for unreadable page URLs
 - improve feedback and error handling
 
 ### Phase 5. Contract Confidence
 
 - formalise payload schema
+- formalise the first-release schema strictness rules for `schemaVersion`, unknown properties, omission, and `null` handling
 - add automated unit tests for core extension behaviour and failure paths
 - add automated payload validation against the shared JSON Schema
 - implement mandatory schema-based contract testing between extension and backend
@@ -826,12 +1007,20 @@ A sensible phased delivery approach is:
 ## 21. Resolved First-Release Defaults
 
 - The default maximum HTML payload size is `1 MiB` (`1,048,576` bytes), measured as the UTF-8 byte length of the captured `html` string before submission. Oversized captures shall return an explicit outcome such as `payload_too_large`.
+- The page URL is mandatory for every payload sent to the backend. If the page URL cannot be read, the extension shall fail explicitly with a documented failure reason such as `url_unavailable` and shall not send a payload.
 - `publishedDate` and `author` shall be derived only from fixed machine-readable signals in a documented precedence order. The first release shall prefer returning `null` over scraping arbitrary page text or layout-specific selectors.
 - Environment-specific endpoint configuration shall be managed through a versioned configuration map bundled with the extension for `local`, `non-production`, and `production`, with only the selected environment key stored in `chrome.storage.local`.
 - The default identity provider is Keycloak, with separate realms and public client registrations for `local`, `non-production`, and `production`.
 - The authorization server shall issue rotating refresh tokens for `non-production` and `production`. The extension shall require full re-authentication when refresh is unavailable or fails. Local mock flows may omit refresh tokens.
+- The first-release authentication configuration shall request the scopes `openid profile link-capture.write` and use the audience `link-capture-api` where the selected environment requires an audience parameter.
+- Capture submission, token exchange, and token refresh requests shall use a `10` second timeout. The first release shall not retry failed submissions automatically, except for exactly one retry after successful token refresh following `401 Unauthorized`.
+- Access tokens shall be stored only in memory or `chrome.storage.session`. Refresh tokens shall be persisted only in `chrome.storage.local` for the active environment so the authenticated session can survive browser restarts. Both shall be cleared on sign-out, active-environment change, refresh failure, and authorization-server rejection.
+- The per-tab runtime state model shall be `idle`, `capturing`, `authenticating`, `submitting`, `succeeded_full`, `succeeded_partial`, and `failed`, with only one active capture allowed per tab.
+- When the selected environment is missing or invalid, the extension shall default to `local`. In the `local` profile, non-empty valid manual endpoint and issuer overrides shall take precedence over bundled local-profile values.
+- The first-release permission model shall rely on `activeTab`, `tabs`, `scripting`, and `identity`, plus static host permissions only for the configured backend API and identity-provider origins.
+- The first-release mock server shall expose deterministic scenario endpoints and response bodies for success, `400`, `401`, `403`, `500`, and timeout cases.
 - `htmlHash` shall use SHA-256 over the UTF-8 bytes of the captured HTML and be formatted as `sha256:<lowercase-hex-digest>`.
-- Visible user feedback is required in the first release. The extension shall provide transient per-tab action badge and tooltip feedback, with no richer routine UI than that required by the existing UX requirements.
+- Visible user feedback is required in the first release. The extension shall provide transient per-tab action badge and tooltip feedback that clears automatically after `5` seconds, with no richer routine UI than that required by the existing UX requirements.
 
 ## 22. Appendix A: Suggested Initial Extension Structure
 

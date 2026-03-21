@@ -128,7 +128,11 @@ Adopt Option A.
 The first-release payload contract must support two valid outcomes:
 
 - Supported HTML pages: `url`, `title`, `html`, `trigger`, `capturedAt`, `schemaVersion`
-- HTML capture blocked: `url`, `title` if available, `trigger`, `capturedAt`, `schemaVersion`, `captureStatus`, `failureReason`
+- HTML capture blocked with readable URL: `url`, `title` if available, `trigger`, `capturedAt`, `schemaVersion`, `captureStatus`, `failureReason`
+
+If the active tab does not expose a readable URL, the extension shall not emit a payload. Instead, it shall return an explicit local failure outcome with a documented failure reason such as `url_unavailable`.
+
+For submitted partial payloads in the first release, `captureStatus` is fixed to `partial` and `failureReason` is fixed to `html_capture_blocked`.
 
 The contract may also include these recommended metadata fields when available and appropriate:
 
@@ -157,9 +161,9 @@ Option A best fits the agreed product requirements and the repo constitution.
 ## Consequences ⚖️
 
 - The PRD, mocks, tests, and any future schema artefacts must represent both full and partial payload outcomes.
-- The implementation must distinguish between supported HTML pages and blocked capture cases.
+- The implementation must distinguish between supported HTML pages, blocked capture cases with readable URLs, and explicit local failures when the URL cannot be read.
 - Privacy review must focus on HTML handling, payload size, and downstream storage/processing controls.
-- The team still needs a follow-up decision on allowed `failureReason` values, HTML size limits, and the hashing algorithm for `htmlHash`.
+- The runtime layer must distinguish between submitted partial-payload reasons and explicit local failure reasons.
 - If later work makes some recommended metadata mandatory, that must be treated as a contract change and reviewed explicitly.
 
 This decision no longer applies if the product scope changes away from HTML capture, or if the backend contract is superseded by a new versioned schema.
@@ -194,7 +198,8 @@ rg -n "schemaVersion|captureStatus|failureReason|htmlHash|canonical URL" docs/pr
 
 - [x] Dan, 2026-03-20, align the PRD with the accepted first-release payload contract
 - [ ] Dan, TBD, formalise the payload contract as JSON Schema or OpenAPI components
-- [ ] Dan, TBD, define allowed `failureReason` values and `htmlHash` algorithm
+- [x] Dan, 2026-03-20, define the `htmlHash` algorithm as SHA-256 over UTF-8 HTML bytes
+- [x] Dan, 2026-03-20, define the first-release submitted payload `failureReason` vocabulary
 
 ## Tags 🏷️
 

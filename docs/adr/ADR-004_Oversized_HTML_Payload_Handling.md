@@ -125,7 +125,7 @@ This option uses content extraction, for example reader-mode or text-only output
 
 Adopt Option A.
 
-The first-release extension shall keep full HTML as the canonical supported-page capture format. The default first-release maximum HTML payload size shall be `1 MiB` (`1,048,576` bytes), measured as the UTF-8 byte length of the captured `html` string before submission. If the captured HTML exceeds that limit, the extension shall not silently trim the HTML and shall not substitute extracted text or reader-mode output. Instead, it shall return an explicit failure or partial-capture outcome with a documented failure reason, such as `payload_too_large`.
+The first-release extension shall keep full HTML as the canonical supported-page capture format. The default first-release maximum HTML payload size shall be `1 MiB` (`1,048,576` bytes), measured as the UTF-8 byte length of the captured `html` string before submission. If the captured HTML exceeds that limit, the extension shall not silently trim the HTML and shall not substitute extracted text or reader-mode output. Instead, it shall return an explicit failure outcome with a documented failure reason, such as `payload_too_large`, and it shall not send a payload.
 
 Transport-level compression may be used where supported, but only as a transport optimisation. Compression must not change the logical payload contract.
 
@@ -145,7 +145,7 @@ Option A gives the cleanest balance of correctness, clarity, and practicality.
 
 - The implementation must measure HTML size deterministically before submission.
 - The schema, mocks, and tests must include oversized-payload behaviour.
-- The backend and extension teams must agree the maximum payload-size threshold separately.
+- The backend and extension teams must keep the documented `1 MiB` threshold aligned across schema, mocks, and tests.
 - Compression can still be evaluated as an optimisation, but not as a substitute for contract decisions.
 - If the product later needs text extraction or reader-mode capture, that should be introduced as a new explicit contract shape or field, not as hidden fallback behaviour.
 
